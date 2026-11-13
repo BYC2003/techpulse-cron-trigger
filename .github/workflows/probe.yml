@@ -1,0 +1,44 @@
+name: Scheduler Probe
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: techpulse-scheduler-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report event
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "run_id=${{ github.run_id }}"
+
+      - name: Read TechPulse snapshot age
+        run: |
+          curl -fsSL --retry 3 --retry-delay 2 \
+            "https://raw.githubusercontent.com/BYC2003/techpulse-dashboard/main/data/latest-24h.json?probe=$(date +%s)" \
+            -o /tmp/latest.json
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+
+          with open('/tmp/latest.json', encoding='utf-8') as fh:
+              data = json.load(fh)
+          generated = datetime.fromisoformat(data['generated_at'].replace('Z', '+00:00'))
+          if generated.tzinfo is None:
+              generated = generated.replace(tzinfo=timezone.utc)
+          age = (datetime.now(timezone.utc) - generated).total_seconds() / 60
+          print(f"snapshot_generated_at={generated.isoformat()}")
+          print(f"snapshot_age_minutes={age:.1f}")
+          print(f"items={len(data.get('items', []))}")
+          PY
